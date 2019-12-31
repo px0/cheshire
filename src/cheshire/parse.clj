@@ -16,9 +16,11 @@
 
 (definline parse-object [^JsonParser jp key-fn bd? array-coerce-fn]
   (let [jp (tag jp)]
-    `(do
+    `(let [array-field-name# (.getCurrentName ~jp)]
        (.nextToken ~jp)
-       (loop [mmap# (transient {})]
+       (loop [mmap# (transient (if ~array-coerce-fn
+                                 (~array-coerce-fn array-field-name#)
+                                 {}))]
          (if-not (identical? (.getCurrentToken ~jp)
                              JsonToken/END_OBJECT)
            (let [key-str# (.getText ~jp)
