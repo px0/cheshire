@@ -14,12 +14,12 @@
   ([obj]
      `(vary-meta ~obj assoc :tag `JsonParser)))
 
-(definline parse-object [^JsonParser jp key-fn bd? array-coerce-fn]
+(definline parse-object [^JsonParser jp key-fn bd? array-coerce-fn map-coerce-fn]
   (let [jp (tag jp)]
-    `(let [array-field-name# (.getCurrentName ~jp)]
+    `(let [object-field-name# (.getCurrentName ~jp)]
        (.nextToken ~jp)
-       (loop [mmap# (transient (if ~array-coerce-fn
-                                 (~array-coerce-fn array-field-name#)
+       (loop [mmap# (transient (if ~map-coerce-fn
+                                 (~map-coerce-fn object-field-name#)
                                  {}))]
          (if-not (identical? (.getCurrentToken ~jp)
                              JsonToken/END_OBJECT)
@@ -27,12 +27,12 @@
                  _# (.nextToken ~jp)
                  key# (~key-fn key-str#)
                  mmap# (assoc! mmap# key#
-                               (parse* ~jp ~key-fn ~bd? ~array-coerce-fn))]
+                               (parse* ~jp ~key-fn ~bd? ~array-coerce-fn ~map-coerce-fn))]
              (.nextToken ~jp)
              (recur mmap#))
            (persistent! mmap#))))))
 
-(definline parse-array [^JsonParser jp key-fn bd? array-coerce-fn]
+(definline parse-array [^JsonParser jp key-fn bd? array-coerce-fn map-coerce-fn]
   (let [jp (tag jp)]
     `(let [array-field-name# (.getCurrentName ~jp)]
        (.nextToken ~jp)
@@ -42,30 +42,30 @@
          (if-not (identical? (.getCurrentToken ~jp)
                              JsonToken/END_ARRAY)
            (let [coll# (conj! coll#
-                              (parse* ~jp ~key-fn ~bd? ~array-coerce-fn))]
+                              (parse* ~jp ~key-fn ~bd? ~array-coerce-fn ~map-coerce-fn))]
              (.nextToken ~jp)
              (recur coll#))
            (persistent! coll#))))))
 
-(defn lazily-parse-array [^JsonParser jp key-fn bd? array-coerce-fn]
+(defn lazily-parse-array [^JsonParser jp key-fn bd? array-coerce-fn map-coerce-fn]
   (lazy-seq
    (loop [chunk-idx 0, buf (chunk-buffer *chunk-size*)]
      (if (identical? (.getCurrentToken jp) JsonToken/END_ARRAY)
        (chunk-cons (chunk buf) nil)
        (do
-         (chunk-append buf (parse* jp key-fn bd? array-coerce-fn))
+         (chunk-append buf (parse* jp key-fn bd? array-coerce-fn map-coerce-fn))
          (.nextToken jp)
          (let [chunk-idx* (unchecked-inc chunk-idx)]
            (if (< chunk-idx* *chunk-size*)
              (recur chunk-idx* buf)
              (chunk-cons
               (chunk buf)
-              (lazily-parse-array jp key-fn bd? array-coerce-fn)))))))))
+              (lazily-parse-array jp key-fn bd? array-coerce-fn map-coerce-fn)))))))))
 
-(defn parse* [^JsonParser jp key-fn bd? array-coerce-fn]
+(defn parse* [^JsonParser jp key-fn bd? array-coerce-fn map-coerce-fn]
   (condp identical? (.getCurrentToken jp)
-    JsonToken/START_OBJECT (parse-object jp key-fn bd? array-coerce-fn)
-    JsonToken/START_ARRAY (parse-array jp key-fn bd? array-coerce-fn)
+    JsonToken/START_OBJECT (parse-object jp key-fn bd? array-coerce-fn map-coerce-fn)
+    JsonToken/START_ARRAY (parse-array jp key-fn bd? array-coerce-fn map-coerce-fn)
     JsonToken/VALUE_STRING (.getText jp)
     JsonToken/VALUE_NUMBER_INT (.getNumberValue jp)
     JsonToken/VALUE_NUMBER_FLOAT (if bd?
@@ -79,15 +79,15 @@
      (Exception.
       (str "Cannot parse " (pr-str (.getCurrentToken jp)))))))
 
-(defn parse-strict [^JsonParser jp key-fn eof array-coerce-fn]
+(defn parse-strict [^JsonParser jp key-fn eof array-coerce-fn map-coerce-fn]
   (let [key-fn (or (if (identical? key-fn true) keyword key-fn) identity)]
     (.nextToken jp)
     (condp identical? (.getCurrentToken jp)
       nil
       eof
-      (parse* jp key-fn *use-bigdecimals?* array-coerce-fn))))
+      (parse* jp key-fn *use-bigdecimals?* array-coerce-fn map-coerce-fn))))
 
-(defn parse [^JsonParser jp key-fn eof array-coerce-fn]
+(defn parse [^JsonParser jp key-fn eof array-coerce-fn map-coerce-fn]
   (let [key-fn (or (if (and (instance? Boolean key-fn) key-fn) keyword key-fn) identity)]
     (.nextToken jp)
     (condp identical? (.getCurrentToken jp)
@@ -97,6 +97,6 @@
       JsonToken/START_ARRAY
       (do
         (.nextToken jp)
-        (lazily-parse-array jp key-fn *use-bigdecimals?* array-coerce-fn))
+        (lazily-parse-array jp key-fn *use-bigdecimals?* array-coerce-fn map-coerce-fn))
 
-      (parse* jp key-fn *use-bigdecimals?* array-coerce-fn))))
+      (parse* jp key-fn *use-bigdecimals?* array-coerce-fn map-coerce-fn))))
